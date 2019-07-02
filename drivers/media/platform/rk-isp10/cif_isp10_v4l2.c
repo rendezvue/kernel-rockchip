@@ -550,7 +550,6 @@ static int cif_isp10_v4l2_streamon(
 	static u32 streamon_cnt_dma;
 	u32 stream_ids = to_stream_id(file);
 
-	mutex_lock(&dev->api_mutex);
 	cif_isp10_pltfrm_pr_dbg(dev->dev, "%s(%d)\n",
 		cif_isp10_v4l2_buf_type_string(queue->type),
 		(stream_ids & CIF_ISP10_STREAM_MP) ? ++streamon_cnt_mp :
@@ -569,12 +568,10 @@ static int cif_isp10_v4l2_streamon(
 		goto err;
 	}
 
-	mutex_unlock(&dev->api_mutex);
 	return 0;
 err:
 	(void)vb2_queue_release(queue);
 	cif_isp10_pltfrm_pr_err(dev->dev, "failed with error %d\n", ret);
-	mutex_unlock(&dev->api_mutex);
 	return ret;
 }
 
@@ -612,17 +609,12 @@ static int cif_isp10_v4l2_streamoff(
 	void *priv,
 	enum v4l2_buf_type buf_type)
 {
-	int ret;
-	struct vb2_queue *queue = to_vb2_queue(file);
-	struct cif_isp10_device *dev = to_cif_isp10_device(queue);
+	int ret = cif_isp10_v4l2_do_streamoff(file);
 
-	mutex_lock(&dev->api_mutex);
-	ret = cif_isp10_v4l2_do_streamoff(file);
 	if (IS_ERR_VALUE(ret))
 		cif_isp10_pltfrm_pr_err(NULL,
 			"failed with error %d\n", ret);
 
-	mutex_unlock(&dev->api_mutex);
 	return ret;
 }
 
@@ -668,14 +660,12 @@ static int cif_isp10_v4l2_reqbufs(
 	struct cif_isp10_device *dev = to_cif_isp10_device(queue);
 	enum cif_isp10_stream_id strm = to_cif_isp10_stream_id(queue);
 
-	mutex_lock(&dev->api_mutex);
 	ret = vb2_ioctl_reqbufs(file, priv, req);
 	if (IS_ERR_VALUE(ret)) {
 		cif_isp10_pltfrm_pr_err(NULL,
 			"videobuf_reqbufs failed with error %d\n", ret);
 	}
 	cif_isp10_reqbufs(dev, strm, req);
-	mutex_unlock(&dev->api_mutex);
 	return ret;
 }
 
@@ -685,15 +675,11 @@ static int cif_isp10_v4l2_querybuf(
 	struct v4l2_buffer *buf)
 {
 	int ret;
-	struct vb2_queue *queue = to_vb2_queue(file);
-	struct cif_isp10_device *dev = to_cif_isp10_device(queue);
 
-	mutex_lock(&dev->api_mutex);
 	ret = vb2_ioctl_querybuf(file, priv, buf);
 	if (IS_ERR_VALUE(ret))
 		cif_isp10_pltfrm_pr_err(NULL,
 			"videobuf_querybuf failed with error %d\n", ret);
-	mutex_unlock(&dev->api_mutex);
 
 	return ret;
 }
@@ -708,12 +694,10 @@ static int cif_isp10_v4l2_s_ctrl(
 	enum cif_isp10_cid id =
 		cif_isp10_v4l2_cid2cif_isp10_cid(vc->id);
 	int val = vc->value;
-	int ret;
 
 	if (IS_ERR_VALUE(id))
 		return id;
 
-	mutex_lock(&dev->api_mutex);
 	switch (vc->id) {
 	case V4L2_CID_COLORFX:
 		val = cif_isp10_v4l2_colorfx2cif_isp10_ie(val);
@@ -732,9 +716,7 @@ static int cif_isp10_v4l2_s_ctrl(
 		break;
 	}
 
-	ret = cif_isp10_s_ctrl(dev, id, val);
-	mutex_unlock(&dev->api_mutex);
-	return ret;
+	return cif_isp10_s_ctrl(dev, id, val);
 }
 
 static int cif_isp10_v4l2_s_fmt(
@@ -753,11 +735,8 @@ static int cif_isp10_v4l2_s_fmt(
 		"%s\n",
 		cif_isp10_v4l2_buf_type_string(queue->type));
 
-	mutex_lock(&dev->api_mutex);
-	if (node->owner && node->owner != fh) {
-		mutex_unlock(&dev->api_mutex);
+	if (node->owner && node->owner != fh)
 		return -EBUSY;
-	}
 
 	strm_fmt.frm_fmt.pix_fmt =
 		cif_isp10_v4l2_pix_fmt2cif_isp10_pix_fmt(
@@ -780,12 +759,10 @@ static int cif_isp10_v4l2_s_fmt(
 	if (IS_ERR_VALUE(ret))
 		goto err;
 
-	mutex_unlock(&dev->api_mutex);
 	return 0;
 err:
 	cif_isp10_pltfrm_pr_err(NULL,
 		"failed with error %d\n", ret);
-	mutex_unlock(&dev->api_mutex);
 	return ret;
 }
 
@@ -800,7 +777,6 @@ static int cif_isp10_v4l2_g_fmt(
 	struct cif_isp10_device *dev = to_cif_isp10_device(queue);
 	enum cif_isp10_stream_id stream_id = to_cif_isp10_stream_id(queue);
 
-	mutex_lock(&dev->api_mutex);
 	switch (stream_id) {
 	case CIF_ISP10_STREAM_SP:
 		pix_fmt = dev->config.mi_config.sp.output.pix_fmt;
@@ -819,11 +795,9 @@ static int cif_isp10_v4l2_g_fmt(
 		f->fmt.pix.pixelformat = cif_isp10_pix_fmt2v4l2_pix_fmt(pix_fmt, queue);
 		break;
 	default:
-		mutex_unlock(&dev->api_mutex);
 		return -EINVAL;
 	}
 
-	mutex_unlock(&dev->api_mutex);
 	return 0;
 }
 
@@ -836,17 +810,14 @@ static int cif_isp10_v4l2_g_input(
 	struct vb2_queue *queue = to_vb2_queue(file);
 	struct cif_isp10_device *dev = to_cif_isp10_device(queue);
 
-	mutex_lock(&dev->api_mutex);
 	ret = cif_isp10_g_input(dev, i);
 	if (IS_ERR_VALUE(ret))
 		goto err;
 
-	mutex_unlock(&dev->api_mutex);
 	return 0;
 err:
 	cif_isp10_pltfrm_pr_err(NULL,
 		"failed with error %d\n", ret);
-	mutex_unlock(&dev->api_mutex);
 	return ret;
 }
 
@@ -861,17 +832,14 @@ static int cif_isp10_v4l2_s_input(
 
 	cif_isp10_pltfrm_pr_dbg(dev->dev, "setting input to %d\n", i);
 
-	mutex_lock(&dev->api_mutex);
 	ret = cif_isp10_s_input(dev, i);
 	if (IS_ERR_VALUE(ret))
 		goto err;
 
-	mutex_unlock(&dev->api_mutex);
 	return 0;
 err:
 	cif_isp10_pltfrm_pr_err(NULL,
 		"failed with error %d\n", ret);
-	mutex_unlock(&dev->api_mutex);
 	return ret;
 }
 
@@ -886,7 +854,6 @@ static int cif_isp10_v4l2_enum_framesizes(
 	struct cif_isp10_device *dev = to_cif_isp10_device(queue);
 	struct v4l2_subdev_frame_size_enum fse;
 
-	mutex_lock(&dev->api_mutex);
 	if (IS_ERR_OR_NULL(dev->img_src)) {
 		cif_isp10_pltfrm_pr_err(NULL,
 			"input has not yet been selected, cannot enumerate formats\n");
@@ -906,11 +873,8 @@ static int cif_isp10_v4l2_enum_framesizes(
 	fsize->discrete.width = fse.max_width;
 	fsize->discrete.height = fse.max_height;
 
-	mutex_unlock(&dev->api_mutex);
 	return 0;
-
 err:
-	mutex_unlock(&dev->api_mutex);
 	return ret;
 }
 
@@ -1068,7 +1032,6 @@ static int cif_isp10_v4l2_open(
 		"video device video%d.%d (%s)\n",
 		vdev->num, vdev->minor, vdev->name);
 
-	mutex_lock(&dev->api_mutex);
 	if (vdev->minor == cif_isp10_v4l2_dev->node[SP_DEV].vdev.minor) {
 		buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 		stream_id = CIF_ISP10_STREAM_SP;
@@ -1101,10 +1064,8 @@ static int cif_isp10_v4l2_open(
 	v4l2_fh_add(&fh->fh);
 
 	node = to_node(fh);
-	if (++node->users > 1) {
-		mutex_unlock(&dev->api_mutex);
+	if (++node->users > 1)
 		return 0;
-	}
 
 	/* First open of the device, so initialize everything */
 	node->owner = NULL;
@@ -1122,12 +1083,10 @@ static int cif_isp10_v4l2_open(
 		goto err;
 	}
 
-	mutex_unlock(&dev->api_mutex);
 	return 0;
 err:
 	cif_isp10_pltfrm_pr_err(NULL,
 		"failed with error %d\n", ret);
-	mutex_unlock(&dev->api_mutex);
 	return ret;
 }
 
@@ -1143,13 +1102,11 @@ static int cif_isp10_v4l2_release(struct file *file)
 	cif_isp10_pltfrm_pr_dbg(dev->dev, "%s\n",
 		cif_isp10_v4l2_buf_type_string(queue->type));
 
-	mutex_lock(&dev->api_mutex);
 	if (node->users) {
 		--node->users;
 	} else {
 		cif_isp10_pltfrm_pr_warn(dev->dev,
 			"number of users for this device is already 0\n");
-		mutex_unlock(&dev->api_mutex);
 		return 0;
 	}
 
@@ -1168,9 +1125,6 @@ static int cif_isp10_v4l2_release(struct file *file)
 	if (node->owner == fh)
 		node->owner = NULL;
 
-	if (file->private_data == queue->owner)
-		queue->owner = NULL;
-
 	v4l2_fh_del(&fh->fh);
 	v4l2_fh_exit(&fh->fh);
 	kfree(fh);
@@ -1178,8 +1132,6 @@ static int cif_isp10_v4l2_release(struct file *file)
 	if (IS_ERR_VALUE(ret))
 		cif_isp10_pltfrm_pr_err(dev->dev,
 			"failed with error %d\n", ret);
-
-	mutex_unlock(&dev->api_mutex);
 	return ret;
 }
 
@@ -1408,12 +1360,10 @@ static long v4l2_default_ioctl(struct file *file, void *fh,
 	struct vb2_queue *queue = to_vb2_queue(file);
 	struct cif_isp10_device *dev = to_cif_isp10_device(queue);
 
-	mutex_lock(&dev->api_mutex);
 	if (!arg) {
 		cif_isp10_pltfrm_pr_err(dev->dev,
 			"NULL Pointer Violation from IOCTL arg:0x%lx\n",
 			(unsigned long)arg);
-		mutex_unlock(&dev->api_mutex);
 		return ret;
 	}
 
@@ -1427,7 +1377,6 @@ static long v4l2_default_ioctl(struct file *file, void *fh,
 		if (ret < 0) {
 			cif_isp10_pltfrm_pr_err(dev->dev,
 				"failed to get sensor mode data\n");
-			mutex_unlock(&dev->api_mutex);
 			return ret;
 		}
 
@@ -1454,7 +1403,6 @@ static long v4l2_default_ioctl(struct file *file, void *fh,
 			if (IS_ERR_VALUE(ret)) {
 				cif_isp10_pltfrm_pr_err(dev->dev,
 					"failed to get isp_output data\n");
-				mutex_unlock(&dev->api_mutex);
 				return ret;
 			}
 		}
@@ -1468,7 +1416,6 @@ static long v4l2_default_ioctl(struct file *file, void *fh,
 		if (ret < 0) {
 			cif_isp10_pltfrm_pr_err(dev->dev,
 				"failed to get camera module information\n");
-			mutex_unlock(&dev->api_mutex);
 			return ret;
 		}
 	} else if (cmd == RK_VIDIOC_SENSOR_CONFIGINFO) {
@@ -1481,7 +1428,6 @@ static long v4l2_default_ioctl(struct file *file, void *fh,
 		if (ret < 0) {
 			cif_isp10_pltfrm_pr_err(dev->dev,
 				"failed to get camera module information\n");
-			mutex_unlock(&dev->api_mutex);
 			return ret;
 		}
 	} else if (cmd == RK_VIDIOC_SENSOR_REG_ACCESS) {
@@ -1494,12 +1440,10 @@ static long v4l2_default_ioctl(struct file *file, void *fh,
 		 if (ret < 0) {
 			cif_isp10_pltfrm_pr_err(dev->dev,
 				"failed to get camera module information\n");
-			mutex_unlock(&dev->api_mutex);
 			return ret;
 		}
 	}
 
-	mutex_unlock(&dev->api_mutex);
 	return ret;
 }
 
@@ -1526,26 +1470,21 @@ static int v4l2_enum_input(struct file *file, void *priv,
 	struct cif_isp10_device *dev = to_cif_isp10_device(queue);
 	const char *inp_name;
 
-	mutex_lock(&dev->api_mutex);
 	if ((queue->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) &&
 		(queue->type != V4L2_BUF_TYPE_VIDEO_OVERLAY)) {
 		cif_isp10_pltfrm_pr_err(NULL,
 			"wrong buffer queue %d\n", queue->type);
-		mutex_unlock(&dev->api_mutex);
 		return -EINVAL;
 	}
 
 	inp_name = cif_isp10_g_input_name(dev, input->index);
-	if (IS_ERR_OR_NULL(inp_name)) {
-		mutex_unlock(&dev->api_mutex);
+	if (IS_ERR_OR_NULL(inp_name))
 		return -EINVAL;
-	}
 
 	input->type = V4L2_INPUT_TYPE_CAMERA;
 	input->std = V4L2_STD_UNKNOWN;
 	strncpy(input->name, inp_name, sizeof(input->name)-1);
 
-	mutex_unlock(&dev->api_mutex);
 	return 0;
 }
 
@@ -1621,15 +1560,11 @@ static int v4l2_enum_fmt_cap(struct file *file, void *fh,
 {
 	int ret = 0;
 	int xgold_num_format = 0;
-	struct vb2_queue *queue = to_vb2_queue(file);
-	struct cif_isp10_device *dev = to_cif_isp10_device(queue);
 
-	mutex_lock(&dev->api_mutex);
 	xgold_num_format = get_cif_isp10_output_format_desc_size();
 	if ((f->index >= xgold_num_format) ||
 	(get_cif_isp10_output_format_desc(f->index)->pixelformat == 0)) {
 		cif_isp10_pltfrm_pr_err(NULL, "index %d\n", f->index);
-		mutex_unlock(&dev->api_mutex);
 		return -EINVAL;
 	}
 	strlcpy(f->description,
@@ -1638,8 +1573,6 @@ static int v4l2_enum_fmt_cap(struct file *file, void *fh,
 	f->pixelformat =
 	get_cif_isp10_output_format_desc(f->index)->pixelformat;
 	f->flags = get_cif_isp10_output_format_desc(f->index)->flags;
-
-	mutex_unlock(&dev->api_mutex);
 
 	return ret;
 }
@@ -1651,9 +1584,7 @@ static int v4l2_g_ctrl(struct file *file, void *priv,
 	struct cif_isp10_device *dev = to_cif_isp10_device(queue);
 	enum cif_isp10_cid id =
 		cif_isp10_v4l2_cid2cif_isp10_cid(vc->id);
-	int ret;
 
-	mutex_lock(&dev->api_mutex);
 	if (id == CIF_ISP10_CID_MIN_BUFFER_FOR_CAPTURE) {
 		/* Three buffers needed at least.
 		 * one for MI_MP_Y_BASE_AD_INIT, one for MI_MP_Y_BASE_AD_SHD
@@ -1663,13 +1594,11 @@ static int v4l2_g_ctrl(struct file *file, void *priv,
 		cif_isp10_pltfrm_pr_dbg(dev->dev,
 			"V4L2_CID_MIN_BUFFERS_FOR_CAPTURE %d\n",
 			vc->value);
-		mutex_unlock(&dev->api_mutex);
 		return 0;
 	}
 
-	ret = cif_isp10_img_src_g_ctrl(dev->img_src, id, &vc->value);
-	mutex_unlock(&dev->api_mutex);
-	return ret;
+	return cif_isp10_img_src_g_ctrl(dev->img_src,
+		id, &vc->value);
 }
 
 static int v4l2_s_ext_ctrls(struct file *file, void *priv,
@@ -1680,8 +1609,7 @@ static int v4l2_s_ext_ctrls(struct file *file, void *priv,
 	struct cif_isp10_device *dev = to_cif_isp10_device(queue);
 	struct cif_isp10_img_src_ext_ctrl ctrl;
 	int ret = -EINVAL;
-	unsigned int i, j;
-	bool cls_exp = false;
+	unsigned int i;
 
 	/* The only use-case is gain and exposure to sensor. Thus no check if
 	 * this shall go to img_src or not as of now.
@@ -1697,28 +1625,19 @@ static int v4l2_s_ext_ctrls(struct file *file, void *priv,
 	if (!ctrls)
 		return -ENOMEM;
 
-	if (vc_ext->controls[0].id == RK_V4L2_CID_CLS_EXP) {
-		j = 1;
-		cls_exp = true;
-		ctrl.cnt = vc_ext->count - 1;
-	} else {
-		j = 0;
-		cls_exp = false;
-		ctrl.cnt = vc_ext->count;
-	}
-
+	ctrl.cnt = vc_ext->count;
 	/*current kernel version don't define
 	 *this member for struct v4l2_ext_control.
 	 */
 	/*ctrl.class = vc_ext->ctrl_class;*/
 	ctrl.ctrls = ctrls;
 
-	for (i = 0; i < ctrl.cnt; i++, j++) {
-		ctrls[i].id = vc_ext->controls[j].id;
-		ctrls[i].val = vc_ext->controls[j].value;
+	for (i = 0; i < vc_ext->count; i++) {
+		ctrls[i].id = vc_ext->controls[i].id;
+		ctrls[i].val = vc_ext->controls[i].value;
 	}
 
-	ret = cif_isp10_s_exp(dev, &ctrl, cls_exp);
+	ret = cif_isp10_s_exp(dev, &ctrl);
 	return ret;
 }
 
@@ -1733,7 +1652,6 @@ int cif_isp10_v4l2_cropcap(
 	u32 target_width, target_height;
 	u32 h_offs, v_offs;
 
-	mutex_lock(&dev->api_mutex);
 	if ((dev->config.input_sel == CIF_ISP10_INP_DMA) ||
 		(dev->config.input_sel == CIF_ISP10_INP_DMA_IE)) {
 		/* calculate cropping for aspect ratio */
@@ -1747,7 +1665,6 @@ int cif_isp10_v4l2_cropcap(
 		if (ret < 0) {
 			cif_isp10_pltfrm_pr_err(dev->dev,
 				"failed to get target frame size\n");
-			mutex_unlock(&dev->api_mutex);
 			return ret;
 		}
 
@@ -1784,7 +1701,6 @@ int cif_isp10_v4l2_cropcap(
 		if (ret < 0) {
 			cif_isp10_pltfrm_pr_err(dev->dev,
 				"failed to get target frame size\n");
-			mutex_unlock(&dev->api_mutex);
 			return ret;
 		}
 
@@ -1817,7 +1733,6 @@ int cif_isp10_v4l2_cropcap(
 		a->bounds.left,
 		a->bounds.top);
 
-	mutex_unlock(&dev->api_mutex);
 	return ret;
 }
 
@@ -1985,7 +1900,6 @@ static int cif_isp10_v4l2_drv_probe(struct platform_device *pdev)
 	spin_lock_init(&dev->iowrite32_verify_lock);
 	spin_lock_init(&dev->isp_state_lock);
 	init_waitqueue_head(&dev->isp_stop_wait);
-	mutex_init(&dev->api_mutex);
 
 	ret = v4l2_device_register(dev->dev, &dev->v4l2_dev);
 	if (IS_ERR_VALUE(ret)) {
