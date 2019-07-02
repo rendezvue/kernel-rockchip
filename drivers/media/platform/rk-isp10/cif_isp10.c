@@ -7061,7 +7061,7 @@ int cif_isp10_isp_isr(unsigned int isp_mis, void *cntxt)
 		spin_unlock(&dev->img_src_exps.lock);
 
 		if (exp)
-			cif_isp10_vs_work_cmd(dev, CIF_ISP10_VS_EXP, (void *)exp);
+			//cif_isp10_vs_work_cmd(dev, CIF_ISP10_VS_EXP, (void *)exp);
 	}
 
 	if (isp_mis & CIF_ISP_FRAME_IN) {

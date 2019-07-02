@@ -470,6 +470,11 @@ static int ov4689_write_aec(struct ov_camera_module *cam_mod)
 		(cam_mod->state == OV_CAMERA_MODULE_STREAMING)) {
 		u32 a_gain = cam_mod->exp_config.gain;
 		u32 exp_time = cam_mod->exp_config.exp_time;
+		
+		if( cam_mod->exp_config.gain_percent == 0 )
+		{
+			cam_mod->exp_config.gain_percent = 100;
+		}
 
 		a_gain = a_gain * cam_mod->exp_config.gain_percent / 100;
 
