@@ -284,6 +284,8 @@ static int cif_isp10_v4l2_cid2cif_isp10_cid(u32 v4l2_cid)
 		return CIF_ISP10_CID_AUTO_FPS;
 	case V4L2_CID_MIN_BUFFERS_FOR_CAPTURE:
 		return CIF_ISP10_CID_MIN_BUFFER_FOR_CAPTURE;
+	case V4L2_CID_TEST_PATTERN:
+		return CIF_ISP10_CID_TEST_PATTERN;
 	default:
 		cif_isp10_pltfrm_pr_err(NULL,
 			"unknown/unsupported V4L2 CID 0x%x\n",
@@ -332,6 +334,8 @@ static enum cif_isp10_pix_fmt cif_isp10_v4l2_pix_fmt2cif_isp10_pix_fmt(
 		return CIF_YUV400;
 	case V4L2_PIX_FMT_Y10:
 		return CIF_Y10;
+	case V4L2_PIX_FMT_Y12:
+		return CIF_Y12;
 	case V4L2_PIX_FMT_YUV420:
 		return CIF_YUV420P;
 	case V4L2_PIX_FMT_YVU420:
@@ -848,6 +852,7 @@ static int cif_isp10_v4l2_enum_framesizes(
 	int ret;
 	struct vb2_queue *queue = to_vb2_queue(file);
 	struct cif_isp10_device *dev = to_cif_isp10_device(queue);
+	struct v4l2_subdev_frame_size_enum fse;
 
 	if (IS_ERR_OR_NULL(dev->img_src)) {
 		cif_isp10_pltfrm_pr_err(NULL,
@@ -856,9 +861,20 @@ static int cif_isp10_v4l2_enum_framesizes(
 		goto err;
 	}
 
-	return -EINVAL;
+	memset(&fse, 0x00, sizeof(fse));
+	fse.index = fsize->index;
+
+	ret = cif_isp10_img_src_enum_frame_size(dev->img_src, &fse);
+	if (IS_ERR_VALUE(ret))
+		goto err;
+
+	fsize->type = V4L2_FRMSIZE_TYPE_DISCRETE;
+
+	fsize->discrete.width = fse.max_width;
+	fsize->discrete.height = fse.max_height;
+
+	return 0;
 err:
-	cif_isp10_pltfrm_pr_err(NULL, "failed with error %d\n", ret);
 	return ret;
 }
 
@@ -906,16 +922,19 @@ static void cif_isp10_v4l2_vb2_queue(struct vb2_buffer *vb)
 	enum cif_isp10_stream_id strm = to_cif_isp10_stream_id(queue);
 	struct cif_isp10_stream *stream = to_stream_by_id(dev, strm);
 	u32 size;
+	unsigned long lock_flags = 0;
 
 	cif_isp10_pltfrm_pr_dbg(NULL,
 		"buffer type %s\n",
 		cif_isp10_v4l2_buf_type_string(queue->type));
 
+	spin_lock_irqsave(&dev->vbq_lock, lock_flags);
 	list_add_tail(&ispbuf->queue, &stream->buf_queue);
 
 	cif_isp10_calc_min_out_buff_size(dev, strm, &size, false);
 	//size = PAGE_ALIGN(size);
 	vb2_set_plane_payload(vb, 0, size);
+	spin_unlock_irqrestore(&dev->vbq_lock, lock_flags);
 }
 
 static void cif_isp10_v4l2_vb2_stop_streaming(struct vb2_queue *queue)
@@ -1050,6 +1069,7 @@ static int cif_isp10_v4l2_open(
 
 	/* First open of the device, so initialize everything */
 	node->owner = NULL;
+	dev->img_src_exps.inited = false;
 
 	cif_isp10_init_vb2_queue(to_vb2_queue(file), dev, buf_type);
 	vdev->queue = to_vb2_queue(file);
@@ -1306,12 +1326,14 @@ static void cif_isp10_v4l2_requeue_bufs(
 	dev = to_cif_isp10_device(q);
 
 	list_for_each_entry(buf, &q->queued_list, queued_entry) {
+		if (buf->state == VB2_BUF_STATE_DONE)
+			continue;
+
 		ispbuf = to_cif_isp10_vb(to_vb2_v4l2_buffer(buf));
 		if (!IS_ERR_VALUE(cif_isp10_qbuf(
 			to_cif_isp10_device(q), stream_id, ispbuf))) {
 			spin_lock(&dev->vbreq_lock);
-			if ((buf->state == VB2_BUF_STATE_QUEUED) ||
-			    (buf->state == VB2_BUF_STATE_DONE)) {
+			if (buf->state == VB2_BUF_STATE_QUEUED) {
 				buf->state = VB2_BUF_STATE_ACTIVE;
 				atomic_inc(&q->owned_by_drv_count);
 			} else if (buf->state == VB2_BUF_STATE_ACTIVE) {
